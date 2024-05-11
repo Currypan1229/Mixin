@@ -159,13 +159,13 @@ potemkinModules {
 
 // Project dependencies
 dependencies {
-    def guava = 'com.google.guava:guava:21.0' // from mc1.12 onwards
+    def guava = 'com.google.guava:guava:17.0' // from mc1.12 onwards
     
     implementation guava
     implementation 'com.google.code.gson:gson:2.2.4'
-    if (Float.parseFloat(asmVersion) < 6) {
+    //if (Float.parseFloat(asmVersion) < 6) {
         implementation "org.ow2.asm:asm-debug-all:$asmVersion"
-    }
+    //} //一時的な削除
     implementation "org.ow2.asm:asm-tree:$asmVersion"
     implementation "org.ow2.asm:asm-commons:$asmVersion"
     implementation "org.ow2.asm:asm-util:$asmVersion"
@@ -488,6 +488,7 @@ publishing {
     }
     
     repositories {
+        mavenLocal()
         if (buildType == 'RELEASE') {
             if (project.hasProperty("releaseRepo")) {
                 maven {

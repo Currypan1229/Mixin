@@ -25,6 +25,7 @@
 package org.spongepowered.asm.mixin.injection.selectors;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
@@ -55,466 +56,143 @@ import com.google.common.base.Strings;
 public abstract class ElementNode<TNode> {
     
     /**
-     * Element node type, returned by <tt>getType</tt> so consumers don't need
-     * to do instanceof checks, and allows switching on element type in a more
-     * expressive way
+     * Create an ElementNode wrapper for the supplied method node
+     *
+     * @param owner class which owns the method or <tt>null</tt>
+     * @param method Method node to wrap
+     * @return ElementNode
      */
-    public static enum NodeType {
-        
-        /**
-         * None or unknown type 
-         */
-        UNDEFINED(false, false, false),
-        
-        /**
-         * A method node 
-         */
-        METHOD(true, false, false),
-        
-        /**
-         * A field node 
-         */
-        FIELD(false, true, false),
-        
-        /**
-         * An invoke instruction 
-         */
-        METHOD_INSN(false, false, true),
-        
-        /**
-         * A get or put field instruction 
-         */
-        FIELD_INSN(false, false, true),
-        
-        /**
-         * An INVOKEDYNAMIC instruction
-         */
-        INVOKEDYNAMIC_INSN(false, false, true);
-        
-        /**
-         * Whether this node holds a method, implies that calling <tt>getMethod
-         * </tt> will return a value
-         */
-        public final boolean hasMethod;
-        
-        /**
-         * Whether this node holds a field, implies that calling <tt>getField
-         * </tt> will return a value
-         */
-        public final boolean hasField;
-        
-        /**
-         * Whether this node holds an insn, implies that calling <tt>getInsn
-         * </tt> will return a value
-         */
-        public final boolean hasInsn;
-
-        private NodeType(boolean isMethod, boolean isField, boolean isInsn) {
-            this.hasMethod = isMethod;
-            this.hasField = isField;
-            this.hasInsn = isInsn;
-        }
-        
+    public static ElementNode<MethodNode> of(ClassNode owner, MethodNode method) {
+        return new ElementNodeMethod(owner, method);
     }
     
     /**
-     * ElementNode for MethodNode
+     * Create an ElementNode wrapper for the supplied field node
+     *
+     * @param owner class which owns the field or <tt>null</tt>
+     * @param field Field node to wrap
+     * @return ElementNode
      */
-    static class ElementNodeMethod extends ElementNode<MethodNode> {
-
-        private final ClassNode owner;
-
-        private final MethodNode method;
-
-        ElementNodeMethod(ClassNode owner, MethodNode method) {
-            this.owner = owner;
-            this.method = method;
-        }
-        
-        @Override
-        public NodeType getType() {
-            return NodeType.METHOD;
-        }
-        
-        @Override
-        public MethodNode getMethod() {
-            return this.method;
-        }
-        
-        @Override
-        public String getOwner() {
-            return this.owner != null ? this.owner.name : null;
-        }
-        
-        @Override
-        public String getName() {
-            return this.method.name;
-        }
-        
-        @Override
-        public String getDesc() {
-            return this.method.desc;
-        }
-        
-        @Override
-        public String getSignature() {
-            return this.method.signature;
-        }
-
-        @Override
-        public MethodNode get() {
-            return this.method;
-        }
-        
-        @Override
-        public boolean equals(Object obj) {
-            return this.method.equals(obj);
-        }
-        
-        @Override
-        public int hashCode() {
-            return this.method.hashCode();
-        }
-        
+    public static ElementNode<FieldNode> of(ClassNode owner, FieldNode field) {
+        return new ElementNodeField(owner, field);
     }
     
     /**
-     * ElementNode for FieldNode
+     * Create an ElementNode wrapper for the supplied node object
+     *
+     * @param node Node to wrap
+     * @param <TNode> Node type
+     * @return ElementNode
+     * @throws IllegalArgumentException if the supplied argument is not a
+     *      {@link MethodNode} or {@link FieldNode}
      */
-    static class ElementNodeField extends ElementNode<FieldNode> {
-
-        private final ClassNode owner;
-
-        private final FieldNode field;
-
-        ElementNodeField(ClassNode owner, FieldNode field) {
-            this.owner = owner;
-            this.field = field;
+    @SuppressWarnings("unchecked")
+    public static <TNode extends AbstractInsnNode> ElementNode<TNode> of(TNode node) {
+        if (node instanceof MethodInsnNode) {
+            return (ElementNode<TNode>)new ElementNodeMethodInsn((MethodInsnNode)node);
+        } else if (node instanceof InvokeDynamicInsnNode) {
+            return (ElementNode<TNode>)new ElementNodeInvokeDynamicInsn((InvokeDynamicInsnNode)node);
+        } else if (node instanceof FieldInsnNode) {
+            return (ElementNode<TNode>)new ElementNodeFieldInsn((FieldInsnNode)node);
         }
-        
-        @Override
-        public NodeType getType() {
-            return NodeType.FIELD;
-        }
-
-        @Override
-        public boolean isField() {
-            return true;
-        }
-        
-        @Override
-        public FieldNode getField() {
-            return this.field;
-        }
-        
-        @Override
-        public String getOwner() {
-            return this.owner != null ? this.owner.name : null;
-        }
-
-        @Override
-        public String getName() {
-            return this.field.name;
-        }
-        
-        @Override
-        public String getDesc() {
-            return this.field.desc;
-        }
-        
-        @Override
-        public String getSignature() {
-            return this.field.signature;
-        }
-
-        @Override
-        public FieldNode get() {
-            return this.field;
-        }
-        
-        @Override
-        public boolean equals(Object obj) {
-            return this.field.equals(obj);
-        }
-        
-        @Override
-        public int hashCode() {
-            return this.field.hashCode();
-        }
-
+        return null;
     }
     
     /**
-     * ElementNode for MethodInsnNode
+     * Convert the supplied list of nodes to a list of wrapped ElementNodes
+     *
+     * @param owner Owner of the supplied nodes, can be <tt>null</tt>
+     * @param list List of nodes
+     * @param <TNode> Node type
+     * @return List of wrapped nodes
      */
-    static class ElementNodeMethodInsn extends ElementNode<MethodInsnNode> {
-        
-        private MethodInsnNode insn;
-        
-        ElementNodeMethodInsn(MethodInsnNode method) {
-            this.insn = method;
+    public static <TNode> List<ElementNode<TNode>> listOf(ClassNode owner, List<TNode> list) {
+        List<ElementNode<TNode>> nodes = new ArrayList<ElementNode<TNode>>();
+        for (TNode node : list) {
+            nodes.add(ElementNode.of(owner, node));
         }
-        
-        @Override
-        public NodeType getType() {
-            return NodeType.METHOD_INSN;
-        }
-        
-        @Override
-        public AbstractInsnNode getInsn() {
-            return this.insn;
-        }
-        
-        @Override
-        public String getOwner() {
-            return this.insn.owner;
-        }
-
-        @Override
-        public String getName() {
-            return this.insn.name;
-        }
-        
-        @Override
-        public String getDesc() {
-            return this.insn.desc;
-        }
-        
-        @Override
-        public String getSignature() {
-            return null;
-        }
-        
-        @Override
-        public MethodInsnNode get() {
-            return this.insn;
-        }
-        
-        @Override
-        public boolean equals(Object obj) {
-            return this.insn.equals(obj);
-        }
-        
-        @Override
-        public int hashCode() {
-            return this.insn.hashCode();
-        }
-
+        return nodes;
     }
     
     /**
-     * ElementNode for InvokeDynamicInsnNode
+     * Create an ElementNode wrapper for the supplied node object
+     *
+     * @param owner class which owns the node or <tt>null</tt>
+     * @param node Node to wrap
+     * @param <TNode> Node type
+     * @return ElementNode
+     * @throws IllegalArgumentException if the supplied argument is not a
+     *      {@link MethodNode} or {@link FieldNode}
      */
-    static class ElementNodeInvokeDynamicInsn extends ElementNode<InvokeDynamicInsnNode> {
-        
-        private InvokeDynamicInsnNode insn;
-        
-        private Type samMethodType;
-        
-        private Handle implMethod;
-        
-        private Type instantiatedMethodType;
-        
-        ElementNodeInvokeDynamicInsn(InvokeDynamicInsnNode invokeDynamic) {
-            this.insn = invokeDynamic;
-            
-            if (invokeDynamic.bsmArgs != null && invokeDynamic.bsmArgs.length > 1) {
-                Object samMethodType = invokeDynamic.bsmArgs[0];
-                Object implMethod = invokeDynamic.bsmArgs[1];
-                Object instantiatedMethodType = invokeDynamic.bsmArgs[2];
-                if (samMethodType instanceof Type && implMethod instanceof Handle && instantiatedMethodType instanceof Type) {
-                    this.samMethodType = (Type)samMethodType;
-                    this.implMethod = (Handle)implMethod;
-                    this.instantiatedMethodType = (Type)instantiatedMethodType;
-                }
-            }
+    @SuppressWarnings("unchecked")
+    public static <TNode> ElementNode<TNode> of(ClassNode owner, TNode node) {
+        if (node instanceof ElementNode) {
+            return (ElementNode<TNode>)node;
+        } else if (node instanceof MethodNode) {
+            return (ElementNode<TNode>)new ElementNodeMethod(owner, (MethodNode)node);
+        } else if (node instanceof FieldNode) {
+            return (ElementNode<TNode>)new ElementNodeField(owner, (FieldNode)node);
+        } else if (node instanceof MethodInsnNode) {
+            return (ElementNode<TNode>)new ElementNodeMethodInsn((MethodInsnNode)node);
+        } else if (node instanceof InvokeDynamicInsnNode) {
+            return (ElementNode<TNode>)new ElementNodeInvokeDynamicInsn((InvokeDynamicInsnNode)node);
+        } else if (node instanceof FieldInsnNode) {
+            return (ElementNode<TNode>)new ElementNodeFieldInsn((FieldInsnNode)node);
         }
-        
-        @Override
-        public NodeType getType() {
-            return NodeType.INVOKEDYNAMIC_INSN;
-        }
-        
-        @Override
-        public boolean isField() {
-            return this.implMethod != null && Handles.isField(this.implMethod);
-        }
-        
-        @Override
-        public AbstractInsnNode getInsn() {
-            return this.insn;
-        }
-        
-        @Override
-        public String getOwner() {
-            return this.implMethod != null ? this.implMethod.getOwner() : this.insn.name;
-        }
-
-        @Override
-        public String getName() {
-            return this.insn.name;
-        }
-        
-        @Override
-        public String getSyntheticName() {
-            return this.implMethod != null ? this.implMethod.getName() : this.insn.name;
-        }
-        
-        @Override
-        public String getDesc() {
-            return this.implMethod != null ? this.implMethod.getDesc() : this.insn.desc;
-        }
-        
-        @Override
-        public String getDelegateDesc() {
-            return this.samMethodType != null ? this.samMethodType.getDescriptor() : this.getDesc();
-        }
-        
-        @Override
-        public String getImplDesc() {
-            return this.instantiatedMethodType != null ? this.instantiatedMethodType.getDescriptor() : this.getDesc();
-        }
-        
-        @Override
-        public String getSignature() {
-            return null;
-        }
-        
-        @Override
-        public InvokeDynamicInsnNode get() {
-            return this.insn;
-        }
-        
-        @Override
-        public boolean equals(Object obj) {
-            return this.insn.equals(obj);
-        }
-        
-        @Override
-        public int hashCode() {
-            return this.insn.hashCode();
-        }
-
+        throw new IllegalArgumentException("Could not create ElementNode for unknown node type: " + node.getClass().getName());
     }
     
     /**
-     * ElementNode for FieldInsnNode
+     * Get a list of wrapped ElementNodes for the fields of the supplied owner
+     * class
+     *
+     * @param owner Class to get fields, must not be <tt>null</tt>
+     * @return List of wrapped nodes
      */
-    static class ElementNodeFieldInsn extends ElementNode<FieldInsnNode> {
-        
-        private FieldInsnNode insn;
-        
-        ElementNodeFieldInsn(FieldInsnNode field) {
-            this.insn = field;
+    public static List<ElementNode<FieldNode>> fieldList(ClassNode owner) {
+        List<ElementNode<FieldNode>> fields = new ArrayList<ElementNode<FieldNode>>();
+        for (FieldNode field : owner.fields) {
+            fields.add(new ElementNodeField(owner, field));
         }
-        
-        @Override
-        public NodeType getType() {
-            return NodeType.FIELD_INSN;
-        }
-        
-        @Override
-        public boolean isField() {
-            return true;
-        }
-
-        @Override
-        public AbstractInsnNode getInsn() {
-            return this.insn;
-        }
-        
-        @Override
-        public String getOwner() {
-            return this.insn.owner;
-        }
-
-        @Override
-        public String getName() {
-            return this.insn.name;
-        }
-        
-        @Override
-        public String getDesc() {
-            return this.insn.desc;
-        }
-        
-        @Override
-        public String getSignature() {
-            return null;
-        }
-        
-        @Override
-        public FieldInsnNode get() {
-            return this.insn;
-        }
-        
-        @Override
-        public boolean equals(Object obj) {
-            return this.insn.equals(obj);
-        }
-        
-        @Override
-        public int hashCode() {
-            return this.insn.hashCode();
-        }
-
+        return fields;
     }
     
     /**
-     * Wrapper iterator for method insns
+     * Get a list of wrapped ElementNodes for the methods of the supplied owner
+     * class
+     *
+     * @param owner Class to get methods, must not be <tt>null</tt>
+     * @return List of wrapped nodes
      */
-    static class ElementNodeIterator implements Iterator<ElementNode<AbstractInsnNode>> {
-        
-        private final Iterator<AbstractInsnNode> iter;
-        
-        private final boolean filterDynamic;
-        
-        ElementNodeIterator(Iterator<AbstractInsnNode> iter, boolean filterDynamic) {
-            this.iter = iter;
-            this.filterDynamic = filterDynamic;
+    public static List<ElementNode<MethodNode>> methodList(ClassNode owner) {
+        List<ElementNode<MethodNode>> methods = new ArrayList<ElementNode<MethodNode>>();
+        for (MethodNode method : owner.methods) {
+            methods.add(new ElementNodeMethod(owner, method));
         }
-
-        @Override
-        public boolean hasNext() {
-            return this.iter.hasNext();
-        }
-
-        @Override
-        public ElementNode<AbstractInsnNode> next() {
-            AbstractInsnNode elem = this.iter.next();
-            return !this.filterDynamic || (elem != null && elem.getOpcode() == Opcodes.INVOKEDYNAMIC) ? ElementNode.of(elem) : null;
-        }
-        
+        return methods;
     }
     
     /**
-     * Wrapper for InsnList which returns node iterator
+     * Get a wrapped version of the supplied insn list which returns element
+     * nodes for each (supported) instruction (FieldInsnNode, MethodInsnNode and
+     * InvokeDynamicInsnNode).
+     *
+     * @param insns Insn list to wrap
+     * @return Wrapper for insn list
      */
-    static class ElementNodeIterable implements Iterable<ElementNode<AbstractInsnNode>> {
-        
-        private final Iterable<AbstractInsnNode> iterable;
-
-        private final boolean filterDynamic;
-        
-        public ElementNodeIterable(Iterable<AbstractInsnNode> iterable, boolean filterDynamic) {
-            this.iterable = iterable;
-            this.filterDynamic = filterDynamic;
-}
-
-        @Override
-        public Iterator<ElementNode<AbstractInsnNode>> iterator() {
-            return new ElementNodeIterator(this.iterable.iterator(), this.filterDynamic);
-        }
-        
+    public static Iterable<ElementNode<AbstractInsnNode>> insnList(InsnList insns) {
+        return new ElementNodeIterable(Arrays.asList(insns.toArray()), false);
     }
     
     /**
-     * Get whether this element is a field type and the descriptor is a bare
-     * type descriptor without arguments. Otherwise assumes the descriptor is a
-     * method descriptor. 
+     * Get a wrapped version of the supplied insn list which returns element
+     * nodes for every INVOKEDYNAMIC instruction only
+     *
+     * @param insns Insn list to wrap
+     * @return Wrapper for insn list
      */
-    public boolean isField() {
-        return false;
+    public static Iterable<ElementNode<AbstractInsnNode>> dynamicInsnList(InsnList insns) {
+        return new ElementNodeIterable(Arrays.asList(insns.toArray()), true);
     }
     
     /**
@@ -548,10 +226,12 @@ public abstract class ElementNode<TNode> {
     }
     
     /**
-     * Get the element owner's name, if this element has an owner, otherwise
-     * returns <tt>null</tt>
+     * Get the synthetic element name. For INVOKEDYNAMIC elements this is the
+     * real name of the lambda method implementing the delegate.
      */
-    public abstract String getOwner();
+    public String getSyntheticName() {
+        return this.getName();
+    }
     
     /**
      * Get the element name
@@ -559,11 +239,10 @@ public abstract class ElementNode<TNode> {
     public abstract String getName();
     
     /**
-     * Get the synthetic element name. For INVOKEDYNAMIC elements this is the
-     * real name of the lambda method implementing the delegate.
+     * For INVOKEDYNAMIC elements, returns original descriptor of the delegate.
      */
-    public String getSyntheticName() {
-        return this.getName();
+    public String getDelegateDesc() {
+        return this.getDesc();
     }
     
     /**
@@ -573,16 +252,9 @@ public abstract class ElementNode<TNode> {
     public abstract String getDesc();
     
     /**
-     * For INVOKEDYNAMIC elements, returns original descriptor of the delegate. 
-     */
-    public String getDelegateDesc() {
-        return this.getDesc();
-    }
-    
-    /**
      * For INVOKEDYNAMIC elements, returns specialised descriptor of the
      * delegate (lambda descriptor without prepended captures), can be the same
-     * as the delegate descriptor or more specialised. 
+     * as the delegate descriptor or more specialised.
      */
     public String getImplDesc() {
         return this.getDesc();
@@ -610,145 +282,474 @@ public abstract class ElementNode<TNode> {
         }
         return String.format("%s%s%s", owner, Strings.nullToEmpty(this.getName()), desc);
     }
-
-    /**
-     * Create an ElementNode wrapper for the supplied method node
-     * 
-     * @param owner class which owns the method or <tt>null</tt>
-     * @param method Method node to wrap
-     * @return ElementNode
-     */
-    public static ElementNode<MethodNode> of(ClassNode owner, MethodNode method) {
-        return new ElementNodeMethod(owner, method);
-    }
     
     /**
-     * Create an ElementNode wrapper for the supplied field node
-     * 
-     * @param owner class which owns the field or <tt>null</tt>
-     * @param field Field node to wrap
-     * @return ElementNode
+     * Get whether this element is a field type and the descriptor is a bare
+     * type descriptor without arguments. Otherwise assumes the descriptor is a
+     * method descriptor.
      */
-    public static ElementNode<FieldNode> of(ClassNode owner, FieldNode field) {
-        return new ElementNodeField(owner, field);
-    }
-    
-    /**
-     * Create an ElementNode wrapper for the supplied node object
-     * 
-     * @param owner class which owns the node or <tt>null</tt>
-     * @param node Node to wrap
-     * @param <TNode> Node type
-     * @return ElementNode
-     * @throws IllegalArgumentException if the supplied argument is not a
-     *      {@link MethodNode} or {@link FieldNode}
-     */
-    @SuppressWarnings("unchecked")
-    public static <TNode> ElementNode<TNode> of(ClassNode owner, TNode node) {
-        if (node instanceof ElementNode) {
-            return (ElementNode<TNode>)node;
-        } else if (node instanceof MethodNode) {
-            return (ElementNode<TNode>)new ElementNodeMethod(owner, (MethodNode)node);
-        } else if (node instanceof FieldNode) {
-            return (ElementNode<TNode>)new ElementNodeField(owner, (FieldNode)node);
-        } else if (node instanceof MethodInsnNode) {
-            return (ElementNode<TNode>)new ElementNodeMethodInsn((MethodInsnNode)node);
-        } else if (node instanceof InvokeDynamicInsnNode) {
-            return (ElementNode<TNode>)new ElementNodeInvokeDynamicInsn((InvokeDynamicInsnNode)node);
-        } else if (node instanceof FieldInsnNode) {
-            return (ElementNode<TNode>)new ElementNodeFieldInsn((FieldInsnNode)node);
-        }
-        throw new IllegalArgumentException("Could not create ElementNode for unknown node type: " + node.getClass().getName());
-    }
-    
-    /**
-     * Create an ElementNode wrapper for the supplied node object
-     * 
-     * @param node Node to wrap
-     * @param <TNode> Node type
-     * @return ElementNode
-     * @throws IllegalArgumentException if the supplied argument is not a
-     *      {@link MethodNode} or {@link FieldNode}
-     */
-    @SuppressWarnings("unchecked")
-    public static <TNode extends AbstractInsnNode> ElementNode<TNode> of(TNode node) {
-        if (node instanceof MethodInsnNode) {
-            return (ElementNode<TNode>)new ElementNodeMethodInsn((MethodInsnNode)node);
-        } else if (node instanceof InvokeDynamicInsnNode) {
-            return (ElementNode<TNode>)new ElementNodeInvokeDynamicInsn((InvokeDynamicInsnNode)node);
-        } else if (node instanceof FieldInsnNode) {
-            return (ElementNode<TNode>)new ElementNodeFieldInsn((FieldInsnNode)node);
-        }
-        return null;
+    public boolean isField() {
+        return false;
     }
 
     /**
-     * Convert the supplied list of nodes to a list of wrapped ElementNodes
-     * 
-     * @param owner Owner of the supplied nodes, can be <tt>null</tt>
-     * @param list List of nodes
-     * @param <TNode> Node type
-     * @return List of wrapped nodes
+     * Get the element owner's name, if this element has an owner, otherwise
+     * returns <tt>null</tt>
      */
-    public static <TNode> List<ElementNode<TNode>> listOf(ClassNode owner, List<TNode> list) {
-        List<ElementNode<TNode>> nodes = new ArrayList<ElementNode<TNode>>();
-        for (TNode node : list) {
-            nodes.add(ElementNode.<TNode>of(owner, node));
-        }
-        return nodes;
-    }
-
+    public abstract String getOwner();
+    
     /**
-     * Get a list of wrapped ElementNodes for the fields of the supplied owner
-     * class
-     * 
-     * @param owner Class to get fields, must not be <tt>null</tt>
-     * @return List of wrapped nodes
+     * Element node type, returned by <tt>getType</tt> so consumers don't need
+     * to do instanceof checks, and allows switching on element type in a more
+     * expressive way
      */
-    public static List<ElementNode<FieldNode>> fieldList(ClassNode owner) {
-        List<ElementNode<FieldNode>> fields = new ArrayList<ElementNode<FieldNode>>();
-        for (FieldNode field : owner.fields) {
-            fields.add(new ElementNodeField(owner, field));
-        }
-        return fields;
-    }
+    public enum NodeType {
 
-    /**
-     * Get a list of wrapped ElementNodes for the methods of the supplied owner
-     * class
-     * 
-     * @param owner Class to get methods, must not be <tt>null</tt>
-     * @return List of wrapped nodes
-     */
-    public static List<ElementNode<MethodNode>> methodList(ClassNode owner) {
-        List<ElementNode<MethodNode>> methods = new ArrayList<ElementNode<MethodNode>>();
-        for (MethodNode method : owner.methods) {
-            methods.add(new ElementNodeMethod(owner, method));
+        /**
+         * None or unknown type
+         */
+        UNDEFINED(false, false, false),
+
+        /**
+         * A method node
+         */
+        METHOD(true, false, false),
+
+        /**
+         * A field node
+         */
+        FIELD(false, true, false),
+
+        /**
+         * An invoke instruction
+         */
+        METHOD_INSN(false, false, true),
+
+        /**
+         * A get or put field instruction
+         */
+        FIELD_INSN(false, false, true),
+
+        /**
+         * An INVOKEDYNAMIC instruction
+         */
+        INVOKEDYNAMIC_INSN(false, false, true);
+
+        /**
+         * Whether this node holds a method, implies that calling <tt>getMethod
+         * </tt> will return a value
+         */
+        public final boolean hasMethod;
+
+        /**
+         * Whether this node holds a field, implies that calling <tt>getField
+         * </tt> will return a value
+         */
+        public final boolean hasField;
+
+        /**
+         * Whether this node holds an insn, implies that calling <tt>getInsn
+         * </tt> will return a value
+         */
+        public final boolean hasInsn;
+
+        NodeType(boolean isMethod, boolean isField, boolean isInsn) {
+            this.hasMethod = isMethod;
+            this.hasField = isField;
+            this.hasInsn = isInsn;
         }
-        return methods;
+
     }
     
     /**
-     * Get a wrapped version of the supplied insn list which returns element
-     * nodes for each (supported) instruction (FieldInsnNode, MethodInsnNode and
-     * InvokeDynamicInsnNode). 
-     * 
-     * @param insns Insn list to wrap
-     * @return Wrapper for insn list
+     * ElementNode for MethodNode
      */
-    public static Iterable<ElementNode<AbstractInsnNode>> insnList(InsnList insns) {
-        return new ElementNodeIterable(insns, false);
+    static class ElementNodeMethod extends ElementNode<MethodNode> {
+
+        private final ClassNode owner;
+
+        private final MethodNode method;
+
+        ElementNodeMethod(ClassNode owner, MethodNode method) {
+            this.owner = owner;
+            this.method = method;
+        }
+
+        @Override
+        public NodeType getType() {
+            return NodeType.METHOD;
+        }
+
+        @Override
+        public MethodNode getMethod() {
+            return this.method;
+        }
+
+        @Override
+        public String getName() {
+            return this.method.name;
+        }
+
+        @Override
+        public String getDesc() {
+            return this.method.desc;
+        }
+
+        @Override
+        public String getSignature() {
+            return this.method.signature;
+        }
+
+        @Override
+        public MethodNode get() {
+            return this.method;
+        }
+
+        @Override
+        public String getOwner() {
+            return this.owner != null ? this.owner.name : null;
+        }
+
+        @Override
+        public int hashCode() {
+            return this.method.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            return this.method.equals(obj);
+        }
+
     }
     
     /**
-     * Get a wrapped version of the supplied insn list which returns element
-     * nodes for every INVOKEDYNAMIC instruction only
-     * 
-     * @param insns Insn list to wrap
-     * @return Wrapper for insn list
+     * ElementNode for FieldNode
      */
-    public static Iterable<ElementNode<AbstractInsnNode>> dynamicInsnList(InsnList insns) {
-        return new ElementNodeIterable(insns, true);
+    static class ElementNodeField extends ElementNode<FieldNode> {
+
+        private final ClassNode owner;
+
+        private final FieldNode field;
+
+        ElementNodeField(ClassNode owner, FieldNode field) {
+            this.owner = owner;
+            this.field = field;
+        }
+
+        @Override
+        public NodeType getType() {
+            return NodeType.FIELD;
+        }
+
+        @Override
+        public FieldNode getField() {
+            return this.field;
+        }
+
+        @Override
+        public String getName() {
+            return this.field.name;
+        }
+
+        @Override
+        public String getDesc() {
+            return this.field.desc;
+        }
+
+        @Override
+        public String getSignature() {
+            return this.field.signature;
+        }
+
+        @Override
+        public FieldNode get() {
+            return this.field;
+        }
+
+        @Override
+        public boolean isField() {
+            return true;
+        }
+
+        @Override
+        public String getOwner() {
+            return this.owner != null ? this.owner.name : null;
+        }
+
+        @Override
+        public int hashCode() {
+            return this.field.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            return this.field.equals(obj);
+        }
+
+    }
+
+    /**
+     * ElementNode for MethodInsnNode
+     */
+    static class ElementNodeMethodInsn extends ElementNode<MethodInsnNode> {
+
+        private final MethodInsnNode insn;
+
+        ElementNodeMethodInsn(MethodInsnNode method) {
+            this.insn = method;
+        }
+
+        @Override
+        public NodeType getType() {
+            return NodeType.METHOD_INSN;
+        }
+
+        @Override
+        public AbstractInsnNode getInsn() {
+            return this.insn;
+        }
+
+        @Override
+        public String getName() {
+            return this.insn.name;
+        }
+
+        @Override
+        public String getDesc() {
+            return this.insn.desc;
+        }
+
+        @Override
+        public String getSignature() {
+            return null;
+        }
+
+        @Override
+        public MethodInsnNode get() {
+            return this.insn;
+        }
+
+        @Override
+        public String getOwner() {
+            return this.insn.owner;
+        }
+
+        @Override
+        public int hashCode() {
+            return this.insn.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            return this.insn.equals(obj);
+        }
+
+    }
+
+    /**
+     * ElementNode for InvokeDynamicInsnNode
+     */
+    static class ElementNodeInvokeDynamicInsn extends ElementNode<InvokeDynamicInsnNode> {
+
+        private final InvokeDynamicInsnNode insn;
+
+        private Type samMethodType;
+
+        private Handle implMethod;
+
+        private Type instantiatedMethodType;
+
+        ElementNodeInvokeDynamicInsn(InvokeDynamicInsnNode invokeDynamic) {
+            this.insn = invokeDynamic;
+
+            if (invokeDynamic.bsmArgs != null && invokeDynamic.bsmArgs.length > 1) {
+                Object samMethodType = invokeDynamic.bsmArgs[0];
+                Object implMethod = invokeDynamic.bsmArgs[1];
+                Object instantiatedMethodType = invokeDynamic.bsmArgs[2];
+                if (samMethodType instanceof Type && implMethod instanceof Handle && instantiatedMethodType instanceof Type) {
+                    this.samMethodType = (Type)samMethodType;
+                    this.implMethod = (Handle)implMethod;
+                    this.instantiatedMethodType = (Type)instantiatedMethodType;
+                }
+            }
+        }
+
+        @Override
+        public NodeType getType() {
+            return NodeType.INVOKEDYNAMIC_INSN;
+        }
+
+        @Override
+        public AbstractInsnNode getInsn() {
+            return this.insn;
+        }
+
+        @Override
+        public String getSyntheticName() {
+            return this.implMethod != null ? this.implMethod.getName() : this.insn.name;
+        }
+
+        @Override
+        public String getName() {
+            return this.insn.name;
+        }
+
+        @Override
+        public String getDelegateDesc() {
+            return this.samMethodType != null ? this.samMethodType.getDescriptor() : this.getDesc();
+        }
+
+        @Override
+        public String getDesc() {
+            return this.implMethod != null ? this.implMethod.getDesc() : this.insn.desc;
+        }
+
+        @Override
+        public String getImplDesc() {
+            return this.instantiatedMethodType != null ? this.instantiatedMethodType.getDescriptor() : this.getDesc();
+        }
+
+        @Override
+        public String getSignature() {
+            return null;
+        }
+
+        @Override
+        public InvokeDynamicInsnNode get() {
+            return this.insn;
+        }
+
+        @Override
+        public boolean isField() {
+            return this.implMethod != null && Handles.isField(this.implMethod);
+        }
+
+        @Override
+        public String getOwner() {
+            return this.implMethod != null ? this.implMethod.getOwner() : this.insn.name;
+        }
+
+        @Override
+        public int hashCode() {
+            return this.insn.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            return this.insn.equals(obj);
+        }
+
+    }
+
+    /**
+     * ElementNode for FieldInsnNode
+     */
+    static class ElementNodeFieldInsn extends ElementNode<FieldInsnNode> {
+
+        private final FieldInsnNode insn;
+
+        ElementNodeFieldInsn(FieldInsnNode field) {
+            this.insn = field;
+        }
+
+        @Override
+        public NodeType getType() {
+            return NodeType.FIELD_INSN;
+        }
+
+        @Override
+        public AbstractInsnNode getInsn() {
+            return this.insn;
+        }
+
+        @Override
+        public String getName() {
+            return this.insn.name;
+        }
+
+        @Override
+        public String getDesc() {
+            return this.insn.desc;
+        }
+
+        @Override
+        public String getSignature() {
+            return null;
+        }
+
+        @Override
+        public FieldInsnNode get() {
+            return this.insn;
+        }
+
+        @Override
+        public boolean isField() {
+            return true;
+        }
+
+        @Override
+        public String getOwner() {
+            return this.insn.owner;
+        }
+
+        @Override
+        public int hashCode() {
+            return this.insn.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            return this.insn.equals(obj);
+        }
+
+    }
+    
+    /**
+     * Wrapper iterator for method insns
+     */
+    static class ElementNodeIterator implements Iterator<ElementNode<AbstractInsnNode>> {
+
+        private final Iterator<AbstractInsnNode> iter;
+
+        private final boolean filterDynamic;
+
+        ElementNodeIterator(Iterator<AbstractInsnNode> iter, boolean filterDynamic) {
+            this.iter = iter;
+            this.filterDynamic = filterDynamic;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return this.iter.hasNext();
+        }
+
+        @Override
+        public ElementNode<AbstractInsnNode> next() {
+            AbstractInsnNode elem = this.iter.next();
+            return !this.filterDynamic || (elem != null && elem.getOpcode() == Opcodes.INVOKEDYNAMIC) ? ElementNode.of(elem) : null;
+        }
+
+    }
+    
+    /**
+     * Wrapper for InsnList which returns node iterator
+     */
+    static class ElementNodeIterable implements Iterable<ElementNode<AbstractInsnNode>> {
+
+        private final Iterable<AbstractInsnNode> iterable;
+
+        private final boolean filterDynamic;
+
+        public ElementNodeIterable(Iterable<AbstractInsnNode> iterable, boolean filterDynamic) {
+            this.iterable = iterable;
+            this.filterDynamic = filterDynamic;
+}
+
+        @Override
+        public Iterator<ElementNode<AbstractInsnNode>> iterator() {
+            return new ElementNodeIterator(this.iterable.iterator(), this.filterDynamic);
+        }
+
     }
     
 }

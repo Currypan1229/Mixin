@@ -28,7 +28,6 @@ import java.lang.reflect.Field;
 import java.util.List;
 import java.util.ListIterator;
 
-import org.objectweb.asm.ConstantDynamic;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
@@ -165,7 +164,7 @@ public final class LanguageFeatures {
      * @param features Language features to format
      * @return Formatted list of features
      */
-    public static final String format(int features) {
+    public static String format(int features) {
         StringBuilder sb = new StringBuilder("[");
         try {
             int count = 0;
@@ -177,7 +176,9 @@ public final class LanguageFeatures {
                     sb.append(field.getName());
                 }
             }
-        } catch (ReflectiveOperationException ex) {
+        } catch (SecurityException ex) {
+            sb.append("ERROR");
+        } catch (IllegalAccessException e) {
             sb.append("ERROR");
         }
         return sb.append(']').toString();

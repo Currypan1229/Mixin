@@ -39,11 +39,98 @@ import org.spongepowered.asm.util.Handles;
  */
 public abstract class MemberRef {
 
+    @Override
+    public int hashCode() {
+        return this.toString().hashCode();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!(obj instanceof MemberRef)) {
+            return false;
+        }
+
+        MemberRef other = (MemberRef)obj;
+        return this.getOpcode() == other.getOpcode()
+                && this.getOwner().equals(other.getOwner())
+                && this.getName().equals(other.getName())
+                && this.getDesc().equals(other.getDesc());
+    }
+
+    @Override
+    public String toString() {
+        return String.format("%s for %s.%s%s%s", Bytecode.getOpcodeName(this.getOpcode()), this.getOwner(), this.getName(), this.isField() ? ":" : "",
+                this.getDesc());
+    }
+
+    /**
+     * The opcode of the invocation.
+     *
+     * @return The opcode of the invocation
+     */
+    public abstract int getOpcode();
+
+    /**
+     * Set the opcode of the invocation.
+     *
+     * @param opcode new opcode
+     */
+    public abstract void setOpcode(int opcode);
+
+    /**
+     * The internal name for the owner of this member.
+     *
+     * @return The owners name
+     */
+    public abstract String getOwner();
+
+    /**
+     * Changes the owner of this
+     *
+     * @param owner New owner
+     */
+    public abstract void setOwner(String owner);
+
+    /**
+     * Name of this member.
+     *
+     * @return Name of this member.
+     */
+    public abstract String getName();
+
+    /**
+     * Whether this member is a field.
+     *
+     * @return If this member is a field, else it is a method
+     */
+    public abstract boolean isField();
+    
+    /**
+     * Descriptor of this member.
+     *
+     * @return Descriptor of this member
+     */
+    public abstract String getDesc();
+
+    /**
+     * Changes the descriptor of this member
+     *
+     * @param desc New descriptor of this member
+     */
+    public abstract void setDesc(String desc);
+
+    /**
+     * Rename this member.
+     *
+     * @param name New name for this member.
+     */
+    public abstract void setName(String name);
+
     /**
      * A static reference to a method backed by an invoke instruction
      */
     public static final class Method extends MemberRef {
-        
+
         private static final int OPCODES = Opcodes.INVOKEVIRTUAL | Opcodes.INVOKESPECIAL | Opcodes.INVOKESTATIC | Opcodes.INVOKEINTERFACE;
 
         /**
@@ -69,7 +156,7 @@ public abstract class MemberRef {
         public int getOpcode() {
             return this.insn.getOpcode();
         }
-        
+
         @Override
         public void setOpcode(int opcode) {
             if ((opcode & Method.OPCODES) == 0) {
@@ -93,7 +180,7 @@ public abstract class MemberRef {
         public String getName() {
             return this.insn.name;
         }
-        
+
         @Override
         public void setName(String name) {
             this.insn.name = name;
@@ -114,7 +201,7 @@ public abstract class MemberRef {
      * A static reference to a field backed by field get/put instruction
      */
     public static final class Field extends MemberRef {
-        
+
         private static final int OPCODES = Opcodes.GETSTATIC | Opcodes.PUTSTATIC | Opcodes.GETFIELD | Opcodes.PUTFIELD;
 
         /**
@@ -140,13 +227,13 @@ public abstract class MemberRef {
         public int getOpcode() {
             return this.insn.getOpcode();
         }
-        
+
         @Override
         public void setOpcode(int opcode) {
             if ((opcode & Field.OPCODES) == 0) {
                 throw new IllegalArgumentException("Invalid opcode for field instruction: 0x" + Integer.toHexString(opcode));
             }
-            
+
             this.insn.setOpcode(opcode);
         }
 
@@ -164,12 +251,12 @@ public abstract class MemberRef {
         public String getName() {
             return this.insn.name;
         }
-        
+
         @Override
         public void setName(String name) {
             this.insn.name = name;
         }
-        
+
         @Override
         public String getDesc() {
             return this.insn.desc;
@@ -221,14 +308,14 @@ public abstract class MemberRef {
             }
             return opcode;
         }
-        
+
         @Override
         public void setOpcode(int opcode) {
             int tag = Handles.tagFromOpcode(opcode);
             if (tag == 0) {
                 throw new MixinTransformerError("Invalid opcode " + Bytecode.getOpcodeName(opcode) + " for method handle " + this.handle + ".");
             }
-            this.setHandle(tag, this.handle.getOwner(), this.handle.getName(), this.handle.getDesc(), this.handle.isInterface());
+            this.setHandle(tag, this.handle.getOwner(), this.handle.getName(), this.handle.getDesc(), this.handle.getTag() == Opcodes.H_INVOKEINTERFACE);
         }
 
         @Override
@@ -238,7 +325,7 @@ public abstract class MemberRef {
 
         @Override
         public void setOwner(String owner) {
-            this.setHandle(this.handle.getTag(), owner, this.handle.getName(), this.handle.getDesc(), this.handle.isInterface());
+            this.setHandle(this.handle.getTag(), owner, this.handle.getName(), this.handle.getDesc(), this.handle.getTag() == Opcodes.H_INVOKEINTERFACE);
         }
 
         @Override
@@ -248,7 +335,7 @@ public abstract class MemberRef {
 
         @Override
         public void setName(String name) {
-            this.setHandle(this.handle.getTag(), this.handle.getOwner(), name, this.handle.getDesc(), this.handle.isInterface());
+            this.setHandle(this.handle.getTag(), this.handle.getOwner(), name, this.handle.getDesc(), this.handle.getTag() == Opcodes.H_INVOKEINTERFACE);
         }
 
         @Override
@@ -258,100 +345,13 @@ public abstract class MemberRef {
 
         @Override
         public void setDesc(String desc) {
-            this.setHandle(this.handle.getTag(), this.handle.getOwner(), this.handle.getName(), desc, this.handle.isInterface());
+            this.setHandle(this.handle.getTag(), this.handle.getOwner(), this.handle.getName(), desc, this.handle.getTag() == Opcodes.H_INVOKEINTERFACE);
         }
 
         public void setHandle(int tag, String owner, String name, String desc, boolean isInterface) {
-            this.handle = new org.objectweb.asm.Handle(tag, owner, name, desc, isInterface);
+            this.handle = new org.objectweb.asm.Handle(tag, owner, name, desc);
         }
 
-    }
-
-    /**
-     * Whether this member is a field.
-     *
-     * @return If this member is a field, else it is a method
-     */
-    public abstract boolean isField();
-
-    /**
-     * The opcode of the invocation.
-     *
-     * @return The opcode of the invocation
-     */
-    public abstract int getOpcode();
-
-    /**
-     * Set the opcode of the invocation.
-     * 
-     * @param opcode new opcode
-     */
-    public abstract void setOpcode(int opcode);
-
-    /**
-     * The internal name for the owner of this member.
-     *
-     * @return The owners name
-     */
-    public abstract String getOwner();
-
-    /**
-     * Changes the owner of this
-     *
-     * @param owner New owner
-     */
-    public abstract void setOwner(String owner);
-
-    /**
-     * Name of this member.
-     *
-     * @return Name of this member.
-     */
-    public abstract String getName();
-    
-    /**
-     * Rename this member.
-     *
-     * @param name New name for this member.
-     */
-    public abstract void setName(String name);
-
-    /**
-     * Descriptor of this member.
-     *
-     * @return Descriptor of this member
-     */
-    public abstract String getDesc();
-
-    /**
-     * Changes the descriptor of this member
-     *
-     * @param desc New descriptor of this member
-     */
-    public abstract void setDesc(String desc);
-
-    @Override
-    public String toString() {
-        return String.format("%s for %s.%s%s%s", Bytecode.getOpcodeName(this.getOpcode()), this.getOwner(), this.getName(), this.isField() ? ":" : "",
-                this.getDesc());
-    }
-
-    @Override
-    public boolean equals(Object obj) {
-        if (!(obj instanceof MemberRef)) {
-            return false;
-        }
-
-        MemberRef other = (MemberRef)obj;
-        return this.getOpcode() == other.getOpcode()
-                && this.getOwner().equals(other.getOwner())
-                && this.getName().equals(other.getName())
-                && this.getDesc().equals(other.getDesc());
-    }
-
-    @Override
-    public int hashCode() {
-        return this.toString().hashCode();
     }
     
 }

@@ -94,7 +94,7 @@ public class Constructor extends Target {
         String targetSuperName = this.classInfo.getSuperName();
         
         Set<String> initialisedFields = new HashSet<String>();
-        for (AbstractInsnNode initialiserInsn : this.insns) {
+        for (AbstractInsnNode initialiserInsn : this.insns.toArray()) {
             if (initialiserInsn.getOpcode() == Opcodes.PUTFIELD) {
                 FieldInsnNode fieldInsn = (FieldInsnNode)initialiserInsn;
                 if (!fieldInsn.owner.equals(targetName)) {

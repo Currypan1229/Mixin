@@ -30,7 +30,6 @@ import java.util.Map.Entry;
 
 import org.spongepowered.asm.logging.Level;
 import org.spongepowered.asm.logging.ILogger;
-import org.objectweb.asm.ConstantDynamic;
 import org.objectweb.asm.Handle;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.Opcodes;
@@ -39,6 +38,7 @@ import org.objectweb.asm.tree.*;
 import org.spongepowered.asm.mixin.MixinEnvironment;
 import org.spongepowered.asm.mixin.MixinEnvironment.CompatibilityLevel;
 import org.spongepowered.asm.mixin.MixinEnvironment.Option;
+import static org.spongepowered.asm.mixin.MixinEnvironment.V11;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.SoftOverride;
 import org.spongepowered.asm.mixin.extensibility.IActivityContext.IActivity;
@@ -197,22 +197,58 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
         this.sessionId = context.getSessionId();
         this.requireVersion(classNode.version);
         
-        InnerClassGenerator icg = context.getExtensions().<InnerClassGenerator>getGenerator(InnerClassGenerator.class);
+        InnerClassGenerator icg = context.getExtensions().getGenerator(InnerClassGenerator.class);
         this.innerClasses = icg.getInnerClasses(this.mixin, this.getTargetClassRef());
     }
     
     /**
+     * Get the target class context
+     *
+     * @return the target class context
+     */
+    public TargetClassContext getTarget() {
+        return this.targetClass;
+    }
+
+    /**
+     * Mark this mixin as requiring the specified class version in the context
+     * of the current target
+     *
+     * @param version version to require
+     */
+    protected void requireVersion(int version) {
+        int majorVersion = version & 0xFFFF;
+        int minorVersion = (version >> 16) & 0xFFFF;
+
+        if (majorVersion <= (this.minRequiredClassVersion & 0xFFFF)) {
+            return;
+        }
+
+        this.minRequiredClassVersion = version;
+
+        // This validation is done on the mixin beforehand, however it's still
+        // possible that an upstream transformer can inject unsupported
+        // instructions without updating the class version.
+        if (majorVersion > ASM.getMaxSupportedClassVersionMajor()) {
+            throw new InvalidMixinException(this, String.format("Unsupported mixin class version %d.%d. ASM supports %s",
+                    majorVersion, minorVersion, ASM.getClassVersionString()));
+        }
+
+        this.mixin.getParent().checkCompatibilityLevel(this.mixin, majorVersion, minorVersion);
+    }
+    
+    /**
      * Add a shadow method to this mixin context, called by the preprocessor
-     * 
+     *
      * @param method shadow method to add
      */
     void addShadowMethod(MethodNode method) {
         this.shadowMethods.add(method);
     }
-
+    
     /**
      * Add a shadow field to this mixin context, called by the preprocessor
-     * 
+     *
      * @param fieldNode field node
      * @param fieldInfo field info
      */
@@ -222,7 +258,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     
     /**
      * Add an accessor method to this mixin context, called by the preprocessor
-     * 
+     *
      * @param method method to add
      * @param type annotation type
      */
@@ -237,14 +273,14 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     
     /**
      * Callback from the applicator which notifies us that a method was merged
-     * 
+     *
      * @param method merged method
      */
     void methodMerged(MethodNode method) {
         this.mergedMethods.add(method);
         this.targetClassInfo.addMethod(method);
         this.getTarget().methodMerged(method);
-        
+
         Annotations.setVisible(method, MixinMerged.class,
                 "mixin", this.getClassName(),
                 "priority", this.getPriority(),
@@ -258,45 +294,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     public String toString() {
         return this.mixin.toString();
     }
-    
-    /**
-     * Get the environment of the owning mixin config
-     * 
-     * @return mixin parent environment
-     */
-    public MixinEnvironment getEnvironment() {
-        return this.mixin.getParent().getEnvironment();
-    }
-    
-    /* (non-Javadoc)
-     * @see org.spongepowered.asm.mixin.refmap.IMixinContext
-     *      #getOption(org.spongepowered.asm.mixin.MixinEnvironment.Option)
-     */
-    @Override
-    public boolean getOption(Option option) {
-        return this.getEnvironment().getOption(option);
-    }
 
-    /**
-     * Get the mixin tree
-     * 
-     * @return mixin tree
-     */
-    @Override
-    public ClassNode getClassNode() {
-        return this.classNode;
-    }
-    
-    /**
-     * Get the mixin class name
-     * 
-     * @return the mixin class name
-     */
-    @Override
-    public String getClassName() {
-        return this.mixin.getClassName();
-    }
-    
     /* (non-Javadoc)
      * @see org.spongepowered.asm.mixin.transformer.IReferenceMapperContext
      *      #getClassRef()
@@ -307,54 +305,18 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     }
     
     /**
-     * Get the target class context
-     * 
-     * @return the target class context
-     */
-    public TargetClassContext getTarget() {
-        return this.targetClass;
-    }
-    
-    /**
-     * Get the target class name
+     * Get the mixin tree
+     *
+     * @return mixin tree
      */
     @Override
-    public String getTargetClassName() {
-        return this.getTarget().getClassName();
-    }
-
-    /**
-     * Get the target class reference
-     * 
-     * @return the reference of the target class (only valid on single-target
-     *      mixins)
-     */
-    @Override
-    public String getTargetClassRef() {
-        return this.getTarget().getClassRef();
-    }
-    
-    /**
-     * Get the target class
-     * 
-     * @return the target class
-     */
-    public ClassNode getTargetClassNode() {
-        return this.getTarget().getClassNode();
-    }
-    
-    /**
-     * Get the target classinfo
-     * 
-     * @return the target class info 
-     */
-    public ClassInfo getTargetClassInfo() {
-        return this.targetClassInfo;
+    public ClassNode getClassNode() {
+        return this.classNode;
     }
     
     /**
      * Get the class info for this class
-     * 
+     *
      * @return the local class info
      */
     @Override
@@ -363,8 +325,26 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     }
     
     /**
+     * Get the target class
+     *
+     * @return the target class
+     */
+    public ClassNode getTargetClassNode() {
+        return this.getTarget().getClassNode();
+    }
+    
+    /**
+     * Get the target classinfo
+     *
+     * @return the target class info
+     */
+    public ClassInfo getTargetClassInfo() {
+        return this.targetClassInfo;
+    }
+
+    /**
      * Get the signature for this mixin class
-     * 
+     *
      * @return signature
      */
     public ClassSignature getSignature() {
@@ -373,7 +353,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     
     /**
      * Get the SourceMap stratum for this mixin
-     * 
+     *
      * @return stratum
      */
     public File getStratum() {
@@ -390,7 +370,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     /**
      * Get the defined value for the {@link Inject#require} parameter on
      * injectors defined in mixins in this configuration.
-     * 
+     *
      * @return default require value
      */
     public int getDefaultRequiredInjections() {
@@ -399,7 +379,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     
     /**
      * Get the defined injector group for injectors
-     * 
+     *
      * @return default group name
      */
     public String getDefaultInjectorGroup() {
@@ -407,8 +387,8 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     }
     
     /**
-     * Get the max shift "by" value for the parent config 
-     * 
+     * Get the max shift "by" value for the parent config
+     *
      * @return max shift by value
      */
     public int getMaxShiftByValue() {
@@ -417,7 +397,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     
     /**
      * Get the injector groups for this target
-     * 
+     *
      * @return injector groups
      */
     public InjectorGroupInfo.Map getInjectorGroups() {
@@ -426,24 +406,24 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     
     /**
      * Get whether overwrite annotations are required for methods in this mixin
-     * 
+     *
      * @return true if overwrite methods must be annoated with {@link Overwrite}
      */
     public boolean requireOverwriteAnnotations() {
         return this.mixin.getParent().requireOverwriteAnnotations();
     }
-
+    
     /**
      * Handles "re-parenting" the method supplied, changes all references to the
      * mixin class to refer to the target class (for field accesses and method
      * invocations) and also handles fixing up the targets of INVOKESPECIAL
      * opcodes for mixins with detached targets.
-     * 
+     *
      * @param method Method to transform
      */
     void transformMethod(MethodNode method) {
         this.activities.clear();
-        
+
         try {
             IActivity activity = this.activities.begin("Validate");
             this.validateMethod(method);
@@ -451,17 +431,17 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
             this.transformDescriptor(method);
             activity.next("Transform LVT");
             this.transformLVT(method);
-    
+
             // Offset line numbers per the stratum
             activity.next("Transform Line Numbers");
             this.stratum.applyOffset(method);
-            
+
             activity.next("Transform Instructions");
             AbstractInsnNode lastInsn = null;
             for (Iterator<AbstractInsnNode> iter = method.instructions.iterator(); iter.hasNext();) {
                 AbstractInsnNode insn = iter.next();
                 IActivity insnActivity = this.activities.begin(Bytecode.getOpcodeName(insn) + " ");
-    
+
                 if (insn instanceof MethodInsnNode) {
                     MethodInsnNode methodNode = (MethodInsnNode)insn;
                     insnActivity.append("%s::%s%s", methodNode.owner, methodNode.name, methodNode.desc);
@@ -482,7 +462,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                     insnActivity.append("%s %s", invokeNode.name, invokeNode.desc);
                     this.transformInvokeDynamicNode(method, iter, invokeNode);
                 }
-                
+
                 lastInsn = insn;
                 insnActivity.end();
             }
@@ -495,21 +475,21 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                     this.activities);
         }
     }
-
+    
     /**
      * Pre-flight checks on a method to be transformed, checks the validity of
      * {@link SoftOverride} annotations and any other required validation tasks
-     * 
+     *
      * @param method Method node to validate
      */
     private void validateMethod(MethodNode method) {
-        // Any method tagged with @SoftOverride must have an implementation visible from 
+        // Any method tagged with @SoftOverride must have an implementation visible from
         if (Annotations.getInvisible(method, SoftOverride.class) != null) {
             if (Bytecode.getVisibility(method) == Visibility.PRIVATE) {
                 throw new InvalidMixinException(this, "Mixin method " + method.name + method.desc
                         + " is tagged with @SoftOverride but the method is PRIVATE");
             }
-            
+
             ClassInfo.Method superMethod = this.targetClassInfo.findMethodInHierarchy(method.name, method.desc, SearchType.SUPER_CLASSES_ONLY,
                     Traversal.SUPER);
             if (superMethod == null || !superMethod.isInjected()) {
@@ -517,7 +497,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                         + "valid method was found in superclasses of " + this.getTarget().getClassName());
             }
         }
-        
+
         if (Bytecode.isVirtual(method)) {
             Method superMethod = this.targetClassInfo.findMethodInHierarchy(method, SearchType.SUPER_CLASSES_ONLY, Traversal.ALL, 0);
             if (superMethod != null && superMethod.isFinal()) {
@@ -526,17 +506,17 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
             }
         }
     }
-
+    
     /**
      * Transform the Local Variable Table (LVT) for the specified mixin method.
-     * 
+     *
      * @param method Method node to transform
      */
     private void transformLVT(MethodNode method) {
         if (method.localVariables == null) {
             return;
         }
-        
+
         IActivity localVarActivity = this.activities.begin("?");
         for (LocalVariableNode local : method.localVariables) {
             if (local == null || local.desc == null) {
@@ -549,18 +529,18 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
         }
         localVarActivity.end();
     }
-
+    
     /**
      * Transforms a method invocation/reference in the method. Updates static
      * and dynamic bindings.
-     * 
+     *
      * @param method Method being processed
      * @param iter Insn interator
      * @param methodRef Method reference to transform
      */
     private void transformMethodRef(MethodNode method, Iterator<AbstractInsnNode> iter, MemberRef methodRef) {
         this.transformDescriptor(methodRef);
-        
+
         if (methodRef.getOwner().equals(this.getClassRef())) {
             methodRef.setOwner(this.getTarget().getClassRef());
             Method md = this.getClassInfo().findMethod(methodRef.getName(), methodRef.getDesc(), ClassInfo.INCLUDE_ALL);
@@ -586,7 +566,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
      * accesses and converts them to real super-invocations and rewrites field
      * accesses which refer to mixin or supermixin classes to their relevant
      * targets.
-     * 
+     *
      * @param method Method being processed
      * @param iter Insn interator
      * @param fieldRef Field Reference to transform
@@ -600,12 +580,12 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                 throw new InvalidMixinException(this.mixin, "Cannot call imaginary super from method handle.");
             }
         }
-        
+
         this.transformDescriptor(fieldRef);
-        
+
         if (fieldRef.getOwner().equals(this.getClassRef())) {
             fieldRef.setOwner(this.getTarget().getClassRef());
-            
+
             Field field = this.getClassInfo().findField(fieldRef.getName(), fieldRef.getDesc(), ClassInfo.INCLUDE_ALL);
             // Fixes a problem with Forge not remapping static field references properly
             if (field != null && field.isRenamed() && field.getOriginalName().equals(fieldRef.getName()) && field.isStatic()) {
@@ -624,12 +604,12 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
         if (!fieldNode.owner.equals(this.getTarget().getClassRef())) {
             return;
         }
-        
+
         int opcode = fieldNode.getOpcode();
         if (opcode == Opcodes.GETFIELD || opcode == Opcodes.GETSTATIC) {
             return;
         }
-        
+
         for (Entry<FieldNode, Field> shadow : this.shadowFields.entrySet()) {
             FieldNode shadowFieldNode = shadow.getKey();
             if (!shadowFieldNode.desc.equals(fieldNode.desc) || !shadowFieldNode.name.equals(fieldNode.name)) {
@@ -640,7 +620,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                 if (shadowField.isDecoratedMutable()) {
                     if (this.mixin.getParent().getEnvironment().getOption(Option.DEBUG_VERBOSE)) {
                         MixinTargetContext.logger.warn("Write access to @Mutable @Final field {} in {}::{}", shadowField, this.mixin, method.name);
-                    }                    
+                    }
                 } else {
                     if (Constants.CTOR.equals(method.name) || Constants.CLINIT.equals(method.name)) {
                         MixinTargetContext.logger.warn("@Final field {} in {} should be final", shadowField, this.mixin);
@@ -650,18 +630,18 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                             throw new InvalidMixinException(this.mixin, "Write access detected to @Final field " + shadowField + " in " + this.mixin
                                     + "::" + method.name);
                         }
-                    }                    
+                    }
                 }
             }
             return;
         }
     }
-    
+
     /**
      * Transforms type operations (eg. cast, instanceof) in the method being
      * processed. Changes references to mixin classes to that of the appropriate
      * class for this context.
-     * 
+     *
      * @param method Method being processed
      * @param iter Insn interator
      * @param typeInsn Insn to transform
@@ -676,7 +656,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
             iter.remove();
             return;
         }
-        
+
         if (typeInsn.desc.equals(this.getClassRef())) {
             typeInsn.desc = this.getTarget().getClassRef();
         } else {
@@ -685,14 +665,14 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                 typeInsn.desc = newName;
             }
         }
-        
+
         this.transformDescriptor(typeInsn);
     }
 
     /**
      * Transforms class literals and method handle loads in the method being
      * processed.
-     * 
+     *
      * @param method Method being processed
      * @param iter Insn interator
      * @param ldcInsn Insn to transform
@@ -740,7 +720,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
         }
         return constant;
     }
-
+    
     /**
      * Transforms a method handle that is referenced from the method being
      * processed.
@@ -763,22 +743,22 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
      * Transforms a dynamic constant, this is currently a blind implementation
      * since I haven't seen this bytecode in the wild.
      * TODO Find out if this even works
-     * 
+     *
      * @param method Method being processed
      * @param iter Insn iterator
      * @param constant Dynamic constant to transform
      * @return Transformed dynamic constant
      */
     private ConstantDynamic transformDynamicConstant(MethodNode method, Iterator<AbstractInsnNode> iter, ConstantDynamic constant) {
-        this.requireVersion(Opcodes.V11);
-        
+        this.requireVersion(MixinEnvironment.V11);
+
         if (!MixinEnvironment.getCompatibilityLevel().supports(LanguageFeatures.DYNAMIC_CONSTANTS)) {
             // Shouldn't get here because we should error out during the initial scan, but you never know
             throw new InvalidMixinException(this, String.format(
                     "%s%s in %s contains a dynamic constant, which is not supported by the current compatibility level",
                     method.name, method.desc, this));
         }
-        
+
         String desc = this.transformSingleDescriptor(constant.getDescriptor(), false);
         Handle bsm = this.transformHandle(method, iter, constant.getBootstrapMethod());
         Object[] bsmArgs = new Object[constant.getBootstrapMethodArgumentCount()];
@@ -796,7 +776,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
      * its <b>own</b> super-implmentation and the methd must also be tagged with
      * {@link SoftOverride} to indicate that the method must exist in a super
      * class.
-     * 
+     *
      * @param method Method being processed
      * @param fieldInsn the GETFIELD insn which access the pseudo-field which is
      *      used as a handle to the superclass
@@ -807,21 +787,21 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                 throw new InvalidMixinException(this, "Illegal imaginary super declaration: field " + fieldInsn.name
                         + " must not specify an initialiser");
             }
-            
+
             throw new InvalidMixinException(this, "Illegal imaginary super access: found " + Bytecode.getOpcodeName(fieldInsn.getOpcode())
                     + " opcode in " + method.name + method.desc);
         }
-        
+
         if ((method.access & Opcodes.ACC_PRIVATE) != 0 || (method.access & Opcodes.ACC_STATIC) != 0) {
             throw new InvalidMixinException(this, "Illegal imaginary super access: method " + method.name + method.desc
                     + " is private or static");
         }
-        
+
         if (Annotations.getInvisible(method, SoftOverride.class) == null) {
             throw new InvalidMixinException(this, "Illegal imaginary super access: method " + method.name + method.desc
                     + " is not decorated with @SoftOverride");
         }
-        
+
         for (Iterator<AbstractInsnNode> methodIter = method.instructions.iterator(method.instructions.indexOf(fieldInsn)); methodIter.hasNext();) {
             AbstractInsnNode insn = methodIter.next();
             if (insn instanceof MethodInsnNode) {
@@ -833,14 +813,14 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                 }
             }
         }
-        
+
         throw new InvalidMixinException(this, "Illegal imaginary super access: could not find INVOKE for " + method.name + method.desc);
     }
 
     /**
      * Update INVOKESPECIAL opcodes to target the topmost class in the hierarchy
      * which contains the specified method.
-     * 
+     *
      * @param method Method containing the instruction
      * @param methodRef Unbound reference to the method
      */
@@ -851,21 +831,21 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     /**
      * Update INVOKEVIRTUAL opcodes to target the topmost class in the hierarchy
      * which contains the specified method.
-     * 
+     *
      * @param method Method containing the instruction
      * @param methodRef Unbound reference to the method
      */
     private void updateDynamicBinding(MethodNode method, MemberRef methodRef) {
         this.updateBinding(method, methodRef, Traversal.ALL);
     }
-    
+
     private void updateBinding(MethodNode method, MemberRef methodRef, Traversal traversal) {
         if (Constants.CTOR.equals(method.name)
                 || methodRef.getOwner().equals(this.getTarget().getClassRef())
                 || this.getTarget().getClassRef().startsWith("<")) {
             return;
         }
-        
+
         ClassInfo.Method superMethod = this.targetClassInfo.findMethodInHierarchy(methodRef.getName(), methodRef.getDesc(),
                 traversal.getSearchType(), traversal);
         if (superMethod != null) {
@@ -878,10 +858,10 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
             throw new MixinTransformerError("Error resolving " + methodRef + " in " + this);
         }
     }
-    
+
     /**
      * Transforms a field descriptor in the context of this mixin target
-     * 
+     *
      * @param field Field node to transform
      */
     void transformDescriptor(FieldNode field) {
@@ -890,63 +870,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
         }
         field.desc = this.transformSingleDescriptor(field.desc, false);
     }
-    
-    /**
-     * Transforms a method descriptor in the context of this mixin target
-     * 
-     * @param method Method node to transform
-     */
-    void transformDescriptor(MethodNode method) {
-        if (!this.inheritsFromMixin && this.innerClasses.size() == 0) {
-            return;
-        }
-        method.desc = this.transformMethodDescriptor(method.desc);
-    }
 
-    /**
-     * Transforms a method or field reference descriptor in the context of this
-     * mixin target
-     * 
-     * @param member Reference to the method or field
-     */
-    void transformDescriptor(MemberRef member) {
-        if (!this.inheritsFromMixin && this.innerClasses.size() == 0) {
-            return;
-        }
-        if (member.isField()) {
-            member.setDesc(this.transformSingleDescriptor(member.getDesc(), false));
-        } else {
-            member.setDesc(this.transformMethodDescriptor(member.getDesc()));
-        }
-    }
-    
-    /**
-     * Transforms a type insn descriptor in the context of this mixin target
-     * 
-     * @param typeInsn Type instruction node to transform
-     */
-    void transformDescriptor(TypeInsnNode typeInsn) {
-        if (!this.inheritsFromMixin && this.innerClasses.size() == 0) {
-            return;
-        }
-        typeInsn.desc = this.transformSingleDescriptor(typeInsn.desc, true);
-    }
-
-    private String transformDescriptor(Type type) {
-        if (type.getSort() == Type.METHOD) {
-            return this.transformMethodDescriptor(type.getDescriptor());
-        }
-        return this.transformSingleDescriptor(type);
-    }
-    
-    private String transformSingleDescriptor(Type type) {
-        if (type.getSort() < Type.ARRAY) {
-            return type.toString();
-        }
-
-        return this.transformSingleDescriptor(type.toString(), false);
-    }
-    
     private String transformSingleDescriptor(String desc, boolean isObject) {
         IActivity descriptorActivity = this.activities.begin("desc=%s", desc);
         boolean isArray = false;
@@ -994,7 +918,84 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
         descriptorActivity.end();
         return realDesc;
     }
+
+    /**
+     * Find the corresponding class type for the supplied mixin class in this
+     * mixin target's hierarchy
+     *
+     * @param mixin Mixin class to discover
+     * @return Transformed
+     */
+    private ClassInfo findRealType(ClassInfo mixin) {
+        if (mixin == this.getClassInfo()) {
+            return this.targetClassInfo;
+        }
+
+        ClassInfo type = this.targetClassInfo.findCorrespondingType(mixin);
+        if (type == null) {
+            throw new InvalidMixinException(this, "Resolution error: unable to find corresponding type for "
+                    + mixin + " in hierarchy of " + this.targetClassInfo);
+        }
+
+        return type;
+    }
     
+    /**
+     * Transforms a method descriptor in the context of this mixin target
+     *
+     * @param method Method node to transform
+     */
+    void transformDescriptor(MethodNode method) {
+        if (!this.inheritsFromMixin && this.innerClasses.size() == 0) {
+            return;
+        }
+        method.desc = this.transformMethodDescriptor(method.desc);
+    }
+    
+    /**
+     * Transforms a method or field reference descriptor in the context of this
+     * mixin target
+     *
+     * @param member Reference to the method or field
+     */
+    void transformDescriptor(MemberRef member) {
+        if (!this.inheritsFromMixin && this.innerClasses.size() == 0) {
+            return;
+        }
+        if (member.isField()) {
+            member.setDesc(this.transformSingleDescriptor(member.getDesc(), false));
+        } else {
+            member.setDesc(this.transformMethodDescriptor(member.getDesc()));
+        }
+    }
+    
+    /**
+     * Transforms a type insn descriptor in the context of this mixin target
+     *
+     * @param typeInsn Type instruction node to transform
+     */
+    void transformDescriptor(TypeInsnNode typeInsn) {
+        if (!this.inheritsFromMixin && this.innerClasses.size() == 0) {
+            return;
+        }
+        typeInsn.desc = this.transformSingleDescriptor(typeInsn.desc, true);
+    }
+
+    private String transformDescriptor(Type type) {
+        if (type.getSort() == Type.METHOD) {
+            return this.transformMethodDescriptor(type.getDescriptor());
+        }
+        return this.transformSingleDescriptor(type);
+    }
+    
+    private String transformSingleDescriptor(Type type) {
+        if (type.getSort() < Type.ARRAY) {
+            return type.toString();
+        }
+
+        return this.transformSingleDescriptor(type.toString(), false);
+    }
+
     private String transformMethodDescriptor(String desc) {
         StringBuilder newDesc = new StringBuilder();
         newDesc.append('(');
@@ -1003,38 +1004,38 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
         }
         return newDesc.append(')').append(this.transformSingleDescriptor(Type.getReturnType(desc))).toString();
     }
-
+    
     /**
      * Get insns corresponding to the instance initialiser (hopefully) from the
      * supplied constructor.
-     * 
+     *
      * @return initialiser bytecode extracted from the supplied constructor, or
      *      null if the constructor range could not be parsed
      */
     final Initialiser getInitialiser() {
-        // Try to find a suitable constructor, we need a constructor with line numbers in order to extract the initialiser 
+        // Try to find a suitable constructor, we need a constructor with line numbers in order to extract the initialiser
         MethodNode ctor = this.getConstructor();
         if (ctor == null) {
             return null;
         }
-        
+
         // Find the range of line numbers which corresponds to the constructor body
         Range init = this.getConstructorRange(ctor);
         if (!init.isValid()) {
             return null;
         }
-        
+
         return new Initialiser(this, ctor, init);
     }
-
+    
     /**
      * Finds a suitable ctor for reading the instance initialiser bytecode
-     * 
+     *
      * @return appropriate ctor or null if none found
      */
     private MethodNode getConstructor() {
         MethodNode ctor = null;
-        
+
         for (MethodNode method : this.getMethods()) {
             if (Constants.CTOR.equals(method.name) && Bytecode.methodHasLineNumbers(method)) {
                 if (ctor == null) {
@@ -1045,14 +1046,14 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                 }
             }
         }
-        
+
         return ctor;
     }
-
+    
     /**
      * Identifies line numbers in the supplied ctor which correspond to the
      * start and end of the method body.
-     * 
+     *
      * @param ctor constructor to scan
      * @return range indicating the line numbers of the specified constructor
      *      and the position of the superclass ctor invocation
@@ -1060,7 +1061,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     private Range getConstructorRange(MethodNode ctor) {
         boolean lineNumberIsValid = false;
         AbstractInsnNode endReturn = null;
-        
+
         int line = 0, start = 0, end = 0, superIndex = -1;
         for (Iterator<AbstractInsnNode> iter = ctor.instructions.iterator(); iter.hasNext();) {
             AbstractInsnNode insn = iter.next();
@@ -1083,36 +1084,45 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                 }
             }
         }
-        
+
         if (endReturn != null) {
             LabelNode label = new LabelNode(new Label());
             ctor.instructions.insertBefore(endReturn, label);
             ctor.instructions.insertBefore(endReturn, new LineNumberNode(start, label));
         }
-        
+
         return new Range(start, end, superIndex);
     }
 
     /**
+     * Get methods to mixin
+     *
+     * @return non-shadow methods in the mixin
+     */
+    List<MethodNode> getMethods() {
+        return this.classNode.methods;
+    }
+
+    /**
      * Get a target method handle from the target class
-     * 
+     *
      * @param method method to get a target handle for
      * @return new or existing target handle for the supplied method
      */
     public Target getTargetMethod(MethodNode method) {
         return this.getTarget().getTargetMethod(method);
     }
-    
+
     MethodNode findMethod(MethodNode method, AnnotationNode annotation) {
         Deque<String> aliases = new LinkedList<String>();
         aliases.add(method.name);
         if (annotation != null) {
-            List<String> aka = Annotations.<List<String>>getValue(annotation, "aliases");
+            List<String> aka = Annotations.getValue(annotation, "aliases");
             if (aka != null) {
                 aliases.addAll(aka);
             }
         }
-        
+
         return this.getTarget().findMethod(aliases, method.desc);
     }
 
@@ -1125,70 +1135,44 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
 
         Deque<String> aliases = new LinkedList<String>();
         aliases.add(remappedName);
-        
+
         return this.getTarget().findAliasedMethod(aliases, method.desc);
     }
     
+    /**
+     * Get the environment of the owning mixin config
+     *
+     * @return mixin parent environment
+     */
+    public MixinEnvironment getEnvironment() {
+        return this.mixin.getParent().getEnvironment();
+    }
+
     FieldNode findField(FieldNode field, AnnotationNode shadow) {
         Deque<String> aliases = new LinkedList<String>();
         aliases.add(field.name);
         if (shadow != null) {
-            List<String> aka = Annotations.<List<String>>getValue(shadow, "aliases");
+            List<String> aka = Annotations.getValue(shadow, "aliases");
             if (aka != null) {
                 aliases.addAll(aka);
             }
         }
-        
+
         return this.getTarget().findAliasedField(aliases, field.desc);
     }
-
+    
     FieldNode findRemappedField(FieldNode field) {
         RemapperChain remapperChain = this.getEnvironment().getRemappers();
         String remappedName = remapperChain.mapFieldName(this.getTarget().getClassRef(), field.name, field.desc);
         if (remappedName.equals(field.name)) {
             return null;
         }
-      
+
         Deque<String> aliases = new LinkedList<String>();
         aliases.add(remappedName);
         return this.getTarget().findAliasedField( aliases, field.desc);
     }
 
-    /**
-     * Mark this mixin as requiring the specified class version in the context
-     * of the current target
-     * 
-     * @param version version to require
-     */
-    protected void requireVersion(int version) {
-        int majorVersion = version & 0xFFFF;
-        int minorVersion = (version >> 16) & 0xFFFF;
-        
-        if (majorVersion <= (this.minRequiredClassVersion & 0xFFFF)) {
-            return;
-        }
-        
-        this.minRequiredClassVersion = version;
-        
-        // This validation is done on the mixin beforehand, however it's still
-        // possible that an upstream transformer can inject unsupported
-        // instructions without updating the class version.
-        if (majorVersion > ASM.getMaxSupportedClassVersionMajor()) {
-            throw new InvalidMixinException(this, String.format("Unsupported mixin class version %d.%d. ASM supports %s",
-                    majorVersion, minorVersion, ASM.getClassVersionString()));
-        }
-        
-        this.mixin.getParent().checkCompatibilityLevel(this.mixin, majorVersion, minorVersion);
-    }
-    
-    /* (non-Javadoc)
-     * @see org.spongepowered.asm.mixin.refmap.IMixinContext#getExtensions()
-     */
-    @Override
-    public Extensions getExtensions() {
-        return this.targetClass.getExtensions();
-    }
-    
     /* (non-Javadoc)
      * @see org.spongepowered.asm.mixin.refmap.IMixinContext#getMixin()
      */
@@ -1197,33 +1181,88 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
         return this.mixin;
     }
 
-    /**
-     * Get the mixin info for this mixin
+    /* (non-Javadoc)
+     * @see org.spongepowered.asm.mixin.refmap.IMixinContext#getExtensions()
      */
-    MixinInfo getInfo() {
-        return this.mixin;
+    @Override
+    public Extensions getExtensions() {
+        return this.targetClass.getExtensions();
     }
     
     /**
-     * True if the parent mixin config is marked as required
+     * Get the mixin class name
+     *
+     * @return the mixin class name
      */
-    boolean isRequired() {
-        return this.mixin.isRequired();
+    @Override
+    public String getClassName() {
+        return this.mixin.getClassName();
+    }
+    
+    /**
+     * Get the target class name
+     */
+    @Override
+    public String getTargetClassName() {
+        return this.getTarget().getClassName();
+    }
+
+    /**
+     * Get the target class reference
+     *
+     * @return the reference of the target class (only valid on single-target
+     *      mixins)
+     */
+    @Override
+    public String getTargetClassRef() {
+        return this.getTarget().getClassRef();
+    }
+    
+    /* (non-Javadoc)
+     * @see org.spongepowered.asm.mixin.transformer.IReferenceMapperContext
+     *      #getReferenceMapper()
+     */
+    @Override
+    public IReferenceMapper getReferenceMapper() {
+        return this.mixin.getParent().getReferenceMapper();
+    }
+
+    /* (non-Javadoc)
+     * @see org.spongepowered.asm.mixin.refmap.IMixinContext
+     *      #getOption(org.spongepowered.asm.mixin.MixinEnvironment.Option)
+     */
+    @Override
+    public boolean getOption(Option option) {
+        return this.getEnvironment().getOption(option);
     }
 
     /**
      * Get the mixin priority
-     * 
+     *
      * @return the priority (only meaningful in relation to other mixins)
      */
     @Override
     public int getPriority() {
         return this.mixin.getPriority();
     }
+    
+    /**
+     * Get the mixin info for this mixin
+     */
+    MixinInfo getInfo() {
+        return this.mixin;
+    }
 
     /**
+     * True if the parent mixin config is marked as required
+     */
+    boolean isRequired() {
+        return this.mixin.isRequired();
+    }
+    
+    /**
      * Get all interfaces for this mixin
-     * 
+     *
      * @return mixin interfaces
      */
     Set<String> getInterfaces() {
@@ -1232,7 +1271,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     
     /**
      * Get shadow methods in this mixin
-     * 
+     *
      * @return shadow methods in the mixin
      */
     Collection<MethodNode> getShadowMethods() {
@@ -1240,26 +1279,17 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     }
 
     /**
-     * Get methods to mixin
-     * 
-     * @return non-shadow methods in the mixin
-     */
-    List<MethodNode> getMethods() {
-        return this.classNode.methods;
-    }
-    
-    /**
      * Get shadow fields in this mixin
-     * 
+     *
      * @return shadow fields in the mixin
      */
     Set<Entry<FieldNode, Field>> getShadowFields() {
         return this.shadowFields.entrySet();
     }
-    
+
     /**
      * Get fields to mixin
-     * 
+     *
      * @return non-shadow fields in the mixin
      */
     List<FieldNode> getFields() {
@@ -1268,26 +1298,26 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
 
     /**
      * Get the logging level for this mixin
-     * 
+     *
      * @return the logging level
      */
     Level getLoggingLevel() {
         return this.mixin.getLoggingLevel();
     }
-
+    
     /**
      * Get whether to propogate the source file attribute from a mixin onto the
      * target class
-     * 
+     *
      * @return true if the sourcefile property should be set on the target class
      */
     boolean shouldSetSourceFile() {
         return this.mixin.getParent().shouldSetSourceFile();
     }
-
+    
     /**
      * Return the source file name for the mixin
-     * 
+     *
      * @return mixin source file
      */
     String getSourceFile() {
@@ -1300,14 +1330,14 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     String getNestHostClass() {
         return ClassNodeAdapter.getNestHostClass(this.classNode);
     }
-    
+
     /**
      * Get the nest members from the mixin
      */
     List<String> getNestMembers() {
         return ClassNodeAdapter.getNestMembers(this.classNode);
     }
-    
+
     /**
      * Get the map of inner classes to remapped inner classes
      */
@@ -1315,34 +1345,25 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
         return this.innerClasses;
     }
 
-    /* (non-Javadoc)
-     * @see org.spongepowered.asm.mixin.transformer.IReferenceMapperContext
-     *      #getReferenceMapper()
-     */
-    @Override
-    public IReferenceMapper getReferenceMapper() {
-        return this.mixin.getParent().getReferenceMapper();
-    }
-
     /**
      * Called immediately before the mixin is applied to targetClass
-     * 
+     *
      * @param transformedName Target class's transformed name
      * @param targetClass Target class
      */
     void preApply(String transformedName, ClassNode targetClass) throws Exception {
         this.mixin.preApply(transformedName, targetClass);
     }
-
+    
     /**
      * Called immediately after the mixin is applied to targetClass
-     * 
+     *
      * @param transformedName Target class's transformed name
      * @param targetClass Target class
      */
     void postApply(String transformedName, ClassNode targetClass) {
         this.activities.clear();
-        
+
         try {
             IActivity activity = this.activities.begin("Validating Injector Groups");
             this.injectorGroups.validateAll();
@@ -1362,38 +1383,38 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                     this.activities);
         }
     }
-    
+
     /**
      * Obtain a unique name for the specified method from the target class
      * context
-     * 
+     *
      * @param method method to obtain a name for
-     * @param preservePrefix true to preserve the method prefix (decorate as 
+     * @param preservePrefix true to preserve the method prefix (decorate as
      *      postfix) otherwise decorates as infix
      * @return unique method name
      */
     String getUniqueName(MethodNode method, boolean preservePrefix) {
         return this.targetClassInfo.getMethodMapper().getUniqueName(this.mixin, method, this.sessionId, preservePrefix);
     }
-
+    
     /**
      * Obtain a unique name for the specified field from the target class
      * context
-     * 
+     *
      * @param field field to obtain a name for
      * @return unique field name
      */
     String getUniqueName(FieldNode field) {
         return this.targetClassInfo.getMethodMapper().getUniqueName(this.mixin, field, this.sessionId);
     }
-    
+
     /**
      * Scans the target class for injector methods and prepares discovered
      * injectors
      */
     void prepareInjections() {
         this.activities.clear();
-        
+
         try {
             this.injectors.clear();
 
@@ -1405,14 +1426,14 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                 if (injectInfo == null) {
                     continue;
                 }
-                
+
                 methodActivity.next("Validate");
                 if (injectInfo.isValid()) {
                     methodActivity.next("Prepare");
                     injectInfo.prepare();
                     this.injectors.add(injectInfo);
                 }
-                
+
                 methodActivity.next("Undecorate");
                 method.visibleAnnotations.remove(injectInfo.getAnnotationNode());
                 methodActivity.end();
@@ -1432,7 +1453,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
      */
     void applyInjections() {
         this.activities.clear();
-        
+
         try {
             IActivity applyActivity = this.activities.begin("PreInject");
             IActivity preInjectActivity = this.activities.begin("?");
@@ -1473,7 +1494,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
     List<MethodNode> generateAccessors() {
         this.activities.clear();
         List<MethodNode> methods = new ArrayList<MethodNode>();
-        
+
         try {
             IActivity accessorActivity = this.activities.begin("Locate");
             IActivity locateActivity = this.activities.begin("?");
@@ -1481,15 +1502,15 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                 locateActivity.next(accessor.toString());
                 accessor.locate();
             }
-            
-            accessorActivity.next("Validate"); 
+
+            accessorActivity.next("Validate");
             IActivity validateActivity = this.activities.begin("?");
             for (AccessorInfo accessor : this.accessors) {
                 validateActivity.next(accessor.toString());
                 accessor.validate();
             }
-            
-            accessorActivity.next("Generate"); 
+
+            accessorActivity.next("Generate");
             IActivity generateActivity = this.activities.begin("?");
             for (AccessorInfo accessor : this.accessors) {
                 generateActivity.next(accessor.toString());
@@ -1497,7 +1518,7 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
                 this.getTarget().addMixinMethod(generated);
                 methods.add(generated);
             }
-            accessorActivity.end(); 
+            accessorActivity.end();
         } catch (InvalidMixinException ex) {
             ex.prepend(this.activities);
             throw ex;
@@ -1505,30 +1526,8 @@ public class MixinTargetContext extends ClassContext implements IMixinContext {
             throw new InvalidMixinException(this, "Unexpecteded " + ex.getClass().getSimpleName() + " whilst transforming the mixin class:", ex,
                     this.activities);
         }
-        
+
         return methods;
-    }
-
-
-    /**
-     * Find the corresponding class type for the supplied mixin class in this
-     * mixin target's hierarchy
-     * 
-     * @param mixin Mixin class to discover
-     * @return Transformed
-     */
-    private ClassInfo findRealType(ClassInfo mixin) {
-        if (mixin == this.getClassInfo()) {
-            return this.targetClassInfo;
-        }
-        
-        ClassInfo type = this.targetClassInfo.findCorrespondingType(mixin);
-        if (type == null) {
-            throw new InvalidMixinException(this, "Resolution error: unable to find corresponding type for "
-                    + mixin + " in hierarchy of " + this.targetClassInfo);
-        }
-        
-        return type;
     }
 
 }
